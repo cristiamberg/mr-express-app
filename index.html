@@ -15,16 +15,13 @@
   <!-- Babel -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-  <!-- Importes Corrigidos -->
+  <!-- Importmap focado apenas no React e Lucide -->
   <script type="importmap">
     {
       "imports": {
         "react": "https://esm.sh/react@18.2.0",
         "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
-        "lucide-react": "https://esm.sh/lucide-react@0.292.0?deps=react@18.2.0",
-        "firebase/app": "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js",
-        "firebase/auth": "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js",
-        "firebase/firestore": "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js"
+        "lucide-react": "https://esm.sh/lucide-react@0.292.0?deps=react@18.2.0"
       }
     }
   </script>
@@ -33,6 +30,7 @@
   
   <div id="root"></div>
 
+  <!-- Note que mudei o script principal para module e mantive o babel -->
   <script type="text/babel" data-type="module">
     import React, { useState, useEffect, useMemo } from 'react';
     import { createRoot } from 'react-dom/client';
@@ -42,9 +40,10 @@
       LogOut, Download, LogIn
     } from 'lucide-react';
     
-    import { initializeApp } from 'firebase/app';
-    import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from 'firebase/auth';
-    import { getFirestore, doc, setDoc, getDoc } from 'firebase/firestore';
+    // Importando Firebase diretamente dos servidores gstatic (Mais estável para navegadores sem bundler)
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js';
+    import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js';
+    import { getFirestore, doc, setDoc, getDoc } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
 
     // AS SUAS CONFIGURAÇÕES DO FIREBASE DA IMAGEM
     const firebaseConfig = {
@@ -148,8 +147,15 @@
       }, [periodo, despesas, entregadores, historico, user, loadingAuth]);
 
       const handleLogin = async () => {
-        try { await signInWithPopup(auth, googleProvider); } 
-        catch (error) { alert("Erro ao fazer login. Tente novamente."); }
+        try { 
+          // O provedor precisa ser instanciado aqui ou fora do componente
+          const provider = new GoogleAuthProvider();
+          await signInWithPopup(auth, provider); 
+        } 
+        catch (error) { 
+          console.error("ERRO DETALHADO DE LOGIN:", error);
+          alert(`Erro ao fazer login: ${error.message}`); 
+        }
       };
 
       const handleInstallApp = async () => {
