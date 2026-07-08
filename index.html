@@ -148,8 +148,10 @@
       const [darkMode, setDarkMode] = useState(true);
       const [toast, setToast] = useState(null);
 
-      const [periodo, setPeriodo] = useState('Quinzena 1');
-      const [dataInicio, setDataInicio] = useState(new Date().toISOString());
+      const [periodoQuinzena, setPeriodoQuinzena] = useState('Quinzena 1');
+      const [periodoMes, setPeriodoMes] = useState('Mês 1');
+      const [dataInicioQuinzena, setDataInicioQuinzena] = useState(new Date().toISOString());
+      const [dataInicioMes, setDataInicioMes] = useState(new Date().toISOString());
       const [despesas, setDespesas] = useState(defaultDespesas);
       const [entregadores, setEntregadores] = useState(defaultEntregadores);
       const [historico, setHistorico] = useState([]);
@@ -196,8 +198,17 @@
             const docSnap = await getDoc(docRef);
             if (docSnap.exists()) {
               const data = docSnap.data();
-              if (data.periodo) setPeriodo(data.periodo);
-              if (data.dataInicio) setDataInicio(data.dataInicio);
+              // Load ou Fallback (para nao quebrar os dados que vc já tinha)
+              if (data.periodoQuinzena) setPeriodoQuinzena(data.periodoQuinzena);
+              else if (data.periodo) setPeriodoQuinzena(data.periodo);
+              
+              if (data.periodoMes) setPeriodoMes(data.periodoMes);
+
+              if (data.dataInicioQuinzena) setDataInicioQuinzena(data.dataInicioQuinzena);
+              else if (data.dataInicio) setDataInicioQuinzena(data.dataInicio);
+
+              if (data.dataInicioMes) setDataInicioMes(data.dataInicioMes);
+
               if (data.despesas) setDespesas(data.despesas);
               if (data.entregadores) setEntregadores(data.entregadores);
               if (data.historico) setHistorico(data.historico);
@@ -213,10 +224,10 @@
       useEffect(() => {
         if (user && !loadingAuth) {
           setDoc(doc(db, 'users', user.uid), {
-            periodo, dataInicio, despesas, entregadores, historico
+            periodoQuinzena, periodoMes, dataInicioQuinzena, dataInicioMes, despesas, entregadores, historico
           }, { merge: true }).catch(err => console.error("Erro ao salvar:", err));
         }
-      }, [periodo, dataInicio, despesas, entregadores, historico, user, loadingAuth]);
+      }, [periodoQuinzena, periodoMes, dataInicioQuinzena, dataInicioMes, despesas, entregadores, historico, user, loadingAuth]);
 
       const handleLogin = async () => {
         try { 
@@ -237,9 +248,13 @@
       };
 
       const exportarCSV = () => {
-        let csv = 'Periodo,Data Inicio,Data Fechamento,Total Despesas,Custo Entregadores,Total Pacotes\n';
+        let csv = 'Tipo,Periodo,Data Inicio,Data Fechamento,Total Despesas,Custo Entregadores,Total Pacotes\n';
         historico.forEach(h => {
-           csv += `${h.periodo},${formatDate(h.dataInicio)},${formatDate(h.dataFechamento)},${h.totais.despesas},${h.totais.entregadores},${h.totais.pacotes}\n`;
+           const tDespesas = h.totais?.despesas || 0;
+           const tEntregadores = h.totais?.entregadores || 0;
+           const tPacotes = h.totais?.pacotes || 0;
+           const tipoStr = h.tipo === 'entregadores' ? 'Quinzena (Equipe)' : (h.tipo === 'despesas' ? 'Mes (Despesas)' : 'Geral (Antigo)');
+           csv += `${tipoStr},${h.periodo},${formatDate(h.dataInicio || h.dataFechamento)},${formatDate(h.dataFechamento)},${tDespesas},${tEntregadores},${tPacotes}\n`;
         });
         const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
         const link = document.createElement("a");
@@ -253,10 +268,8 @@
         const totalDespesas = despesas.reduce((acc, curr) => acc + parseNumber(curr.valor), 0);
         const totalDespesasPagas = despesas.filter(d => d.pago).reduce((acc, curr) => acc + parseNumber(curr.valor), 0);
         
-        // Custos com entregadores
         const totalEntregadores = entregadores.reduce((acc, curr) => acc + (parseNumber(curr.valorPorPacote) * parseNumber(curr.quantidade)), 0);
         
-        // Pagamentos de entregadores (se pago = tudo. se pendente = apenas soma os vales dados)
         const totalEntregadoresPagos = entregadores.reduce((acc, curr) => {
             const custoTotal = parseNumber(curr.valorPorPacote) * parseNumber(curr.quantidade);
             return acc + (curr.pago ? custoTotal : parseNumber(curr.vales || 0));
@@ -288,32 +301,66 @@
       const addEntregador = () => { setEntregadores([...entregadores, { id: Date.now(), nome: '', valorPorPacote: 0, quantidade: 0, vales: 0, pago: false }]); showToast("Entregador adicionado."); };
       const removeEntregador = (id) => { setEntregadores(entregadores.filter(e => e.id !== id)); showToast("Entregador removido."); };
 
-      const requestFecharSemana = () => {
+      // =============== FUNÇÕES DE FECHAMENTO SEPARADAS ===============
+
+      const requestFecharQuinzena = () => {
         setModalConfig({
           isOpen: true,
-          title: 'Fechar Quinzena e Salvar?',
-          message: `Deseja finalizar "${periodo}" e salvar no Histórico?\n\nIsso zerará as quantidades, vales e status dos entregadores. (Nomes e valores mantidos).`,
-          action: executeFecharSemana
+          title: 'Fechar Quinzena (Entregadores)?',
+          message: `Deseja finalizar "${periodoQuinzena}" e salvar no Histórico?\n\nIsso zerará as quantidades, vales e status APENAS DOS ENTREGADORES.\n(Suas Despesas Fixas não serão alteradas).`,
+          action: executeFecharQuinzena
         });
       };
 
-      const executeFecharSemana = () => {
+      const executeFecharQuinzena = () => {
         const novoFechamento = {
           id: Date.now().toString(),
-          dataInicio: dataInicio,
+          tipo: 'entregadores', // Marca que é um fechamento só de equipe
+          dataInicio: dataInicioQuinzena,
           dataFechamento: new Date().toISOString(),
-          periodo: periodo, totais: { ...totais },
-          entregadores: [...entregadores], despesas: [...despesas]
+          periodo: periodoQuinzena, 
+          totais: { entregadores: totais.entregadores, pacotes: totais.pacotes },
+          entregadores: [...entregadores]
         };
+        
         setHistorico([novoFechamento, ...historico]);
-        setDespesas(despesas.map(d => ({ ...d, pago: false })));
         setEntregadores(entregadores.map(e => ({ ...e, quantidade: 0, vales: 0, pago: false })));
         
-        setDataInicio(new Date().toISOString());
-        const numeroAtual = parseInt(periodo.replace(/\D/g, '')) || 0;
-        setPeriodo(numeroAtual > 0 ? `Quinzena ${numeroAtual + 1}` : 'Novo Período');
+        setDataInicioQuinzena(new Date().toISOString());
+        const numeroAtual = parseInt(periodoQuinzena.replace(/\D/g, '')) || 0;
+        setPeriodoQuinzena(numeroAtual > 0 ? `Quinzena ${numeroAtual + 1}` : 'Nova Quinzena');
         setActiveTab('historico');
         showToast("Quinzena fechada com sucesso!");
+      };
+
+      const requestFecharMes = () => {
+        setModalConfig({
+          isOpen: true,
+          title: 'Fechar Mês (Despesas)?',
+          message: `Deseja finalizar "${periodoMes}" e salvar no Histórico?\n\nIsso alterará os status das DESPESAS FIXAS para Pendente novamente.\n(Os entregadores não serão afetados).`,
+          action: executeFecharMes
+        });
+      };
+
+      const executeFecharMes = () => {
+        const novoFechamento = {
+          id: Date.now().toString(),
+          tipo: 'despesas', // Marca que é um fechamento só de despesas
+          dataInicio: dataInicioMes,
+          dataFechamento: new Date().toISOString(),
+          periodo: periodoMes, 
+          totais: { despesas: totais.despesas },
+          despesas: [...despesas]
+        };
+        
+        setHistorico([novoFechamento, ...historico]);
+        setDespesas(despesas.map(d => ({ ...d, pago: false })));
+        
+        setDataInicioMes(new Date().toISOString());
+        const numeroAtual = parseInt(periodoMes.replace(/\D/g, '')) || 0;
+        setPeriodoMes(numeroAtual > 0 ? `Mês ${numeroAtual + 1}` : 'Novo Mês');
+        setActiveTab('historico');
+        showToast("Mês fechado com sucesso!");
       };
 
       const requestDeletarHistorico = (id) => {
@@ -402,8 +449,13 @@
                   <button onClick={() => setIsMobileMenuOpen(true)} className="text-slate-600 dark:text-slate-300 p-1"><Menu size={24} /></button>
                   <h1 className="text-lg font-bold text-slate-800 dark:text-white">MR EXPRESS</h1>
                 </div>
-                <div className="bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/30 px-2 py-1 rounded text-xs font-bold truncate max-w-[100px]">
-                  {periodo.split(' ')[0] || 'Atual'}
+                <div className="flex space-x-2">
+                  <div className="bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/30 px-2 py-1 rounded text-[10px] font-bold truncate max-w-[80px]">
+                    {periodoQuinzena.split(' ')[0] || 'Q.'}
+                  </div>
+                  <div className="bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-500/30 px-2 py-1 rounded text-[10px] font-bold truncate max-w-[80px]">
+                    {periodoMes.split(' ')[0] || 'M.'}
+                  </div>
                 </div>
               </header>
 
@@ -412,16 +464,25 @@
                   
                   {activeTab === 'resumo' && (
                     <div className="space-y-6 animate-in fade-in zoom-in-95 duration-300">
-                      <div className="flex flex-col sm:flex-row justify-between items-center gap-4 bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700 print:hidden transition-colors shadow-sm">
-                        <div className="text-sm text-slate-500 dark:text-slate-400 flex items-center">
-                          Período: <span className="ml-2 font-bold text-emerald-600 dark:text-emerald-400 text-lg">{periodo}</span>
+                      
+                      <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700 print:hidden transition-colors shadow-sm">
+                        <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-6 w-full md:w-auto text-sm text-slate-500 dark:text-slate-400">
+                          <div className="flex items-center bg-slate-50 dark:bg-slate-900/50 px-3 py-2 rounded-lg border border-slate-100 dark:border-slate-700/50">
+                            Equipe Ativa: <span className="ml-2 font-bold text-emerald-600 dark:text-emerald-400">{periodoQuinzena}</span>
+                          </div>
+                          <div className="flex items-center bg-slate-50 dark:bg-slate-900/50 px-3 py-2 rounded-lg border border-slate-100 dark:border-slate-700/50">
+                            Mês Ativo: <span className="ml-2 font-bold text-blue-600 dark:text-blue-400">{periodoMes}</span>
+                          </div>
                         </div>
-                        <div className="flex w-full sm:w-auto gap-2">
-                          <button onClick={() => window.print()} className="flex-1 sm:flex-none flex items-center justify-center space-x-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-sm font-medium">
+                        <div className="flex flex-wrap w-full md:w-auto gap-2 justify-end">
+                          <button onClick={() => window.print()} className="flex-1 sm:flex-none flex items-center justify-center space-x-2 px-3 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-lg transition-colors text-sm font-bold shadow-sm">
                             <Printer size={16} /> <span>PDF</span>
                           </button>
-                          <button onClick={requestFecharSemana} className="flex-1 sm:flex-none flex items-center justify-center space-x-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors text-sm font-medium">
+                          <button onClick={requestFecharQuinzena} className="flex-1 sm:flex-none flex items-center justify-center space-x-2 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors text-sm font-bold shadow-sm">
                             <Save size={16} /> <span>Fechar Quinzena</span>
+                          </button>
+                          <button onClick={requestFecharMes} className="flex-1 sm:flex-none flex items-center justify-center space-x-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-sm font-bold shadow-sm">
+                            <Save size={16} /> <span>Fechar Mês</span>
                           </button>
                         </div>
                       </div>
@@ -463,9 +524,9 @@
                               <span className="text-slate-600 dark:text-slate-300 font-medium">Total Previsto:</span>
                               <span className="font-bold text-lg text-slate-800 dark:text-white">{formatCurrency(totais.despesas)}</span>
                             </div>
-                            <div className="flex justify-between items-center bg-emerald-50 dark:bg-emerald-900/10 p-3 rounded-lg border border-emerald-100 dark:border-transparent">
-                              <span className="text-emerald-700 dark:text-emerald-400 font-medium">Total Pago:</span>
-                              <span className="font-bold text-lg text-emerald-600 dark:text-emerald-400">{formatCurrency(totais.despesasPagas)}</span>
+                            <div className="flex justify-between items-center bg-blue-50 dark:bg-blue-900/10 p-3 rounded-lg border border-blue-100 dark:border-transparent">
+                              <span className="text-blue-700 dark:text-blue-400 font-medium">Total Pago:</span>
+                              <span className="font-bold text-lg text-blue-600 dark:text-blue-400">{formatCurrency(totais.despesasPagas)}</span>
                             </div>
                           </div>
                         </div>
@@ -495,13 +556,16 @@
 
                   {activeTab === 'despesas' && (
                     <div className="animate-in fade-in slide-in-from-right-8 duration-300">
-                      <div className="flex justify-between items-center mb-6">
+                      <div className="flex flex-col sm:flex-row justify-between sm:items-center mb-6 gap-4">
                         <h2 className="text-xl font-bold text-slate-800 dark:text-white flex items-center">
-                          <Wallet className="mr-2 text-blue-500 dark:text-blue-400" /> Despesas Fixas
+                          <Wallet className="mr-2 text-blue-500 dark:text-blue-400" /> Despesas Fixas do Mês
                         </h2>
-                        <button onClick={addDespesa} className="flex items-center bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-sm font-bold transition-colors shadow-sm">
-                          <Plus size={16} className="mr-1" /> Adicionar
-                        </button>
+                        <div className="flex items-center gap-2">
+                           <input type="text" value={periodoMes} onChange={(e) => setPeriodoMes(e.target.value)} className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-blue-600 dark:text-blue-400 rounded-lg px-3 py-2 text-sm font-black focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 w-full sm:w-auto text-center shadow-sm" placeholder="Ex: Mês de Agosto" />
+                           <button onClick={addDespesa} className="flex items-center bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-sm font-bold transition-colors shadow-sm">
+                             <Plus size={16} className="mr-1" /> Adicionar
+                           </button>
+                        </div>
                       </div>
 
                       <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden transition-colors">
@@ -510,17 +574,17 @@
                         </div>
                         <div className="divide-y divide-slate-100 dark:divide-slate-700/50">
                           {despesas.map((item) => (
-                            <div key={item.id} className={`p-4 transition-colors ${item.pago ? 'bg-emerald-50 dark:bg-emerald-900/10' : 'hover:bg-slate-50 dark:hover:bg-slate-700/30'}`}>
+                            <div key={item.id} className={`p-4 transition-colors ${item.pago ? 'bg-blue-50 dark:bg-blue-900/10' : 'hover:bg-slate-50 dark:hover:bg-slate-700/30'}`}>
                               <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
                                 <div className="col-span-1 md:col-span-6">
-                                  <input type="text" value={item.descricao} onChange={(e) => updateDespesa(item.id, 'descricao', e.target.value)} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-2 text-slate-800 dark:text-white focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 font-medium" placeholder="Ex: Aluguel" />
+                                  <input type="text" value={item.descricao} onChange={(e) => updateDespesa(item.id, 'descricao', e.target.value)} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-2 text-slate-800 dark:text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-medium" placeholder="Ex: Aluguel" />
                                 </div>
                                 <div className="col-span-1 md:col-span-3 relative">
                                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm font-bold">R$</span>
-                                  <input type="number" step="0.01" value={item.valor || ''} onChange={(e) => updateDespesa(item.id, 'valor', parseFloat(e.target.value) || 0)} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-600 rounded-lg pl-9 pr-3 py-2 text-slate-800 dark:text-white focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 font-mono font-bold" placeholder="0.00" />
+                                  <input type="number" step="0.01" value={item.valor || ''} onChange={(e) => updateDespesa(item.id, 'valor', parseFloat(e.target.value) || 0)} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-600 rounded-lg pl-9 pr-3 py-2 text-slate-800 dark:text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-mono font-bold" placeholder="0.00" />
                                 </div>
                                 <div className="col-span-1 md:col-span-3 flex items-center justify-between md:justify-around mt-2 md:mt-0">
-                                  <button onClick={() => toggleDespesaPago(item.id)} className={`flex items-center space-x-2 px-3 py-2 rounded-full text-sm font-bold transition-all w-32 justify-center shadow-sm ${item.pago ? 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/30' : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-transparent'}`}>
+                                  <button onClick={() => toggleDespesaPago(item.id)} className={`flex items-center space-x-2 px-3 py-2 rounded-full text-sm font-bold transition-all w-32 justify-center shadow-sm ${item.pago ? 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-500/30' : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-transparent'}`}>
                                     {item.pago ? <CheckCircle size={16} /> : <Circle size={16} />} <span>{item.pago ? 'Pago' : 'Pendente'}</span>
                                   </button>
                                   <button onClick={() => removeDespesa(item.id)} className="p-2 text-slate-400 hover:text-rose-500 bg-white dark:bg-transparent rounded-full shadow-sm md:shadow-none border border-slate-200 md:border-none dark:border-transparent"><Trash2 size={18} /></button>
@@ -544,7 +608,7 @@
                           <Users className="mr-2 text-amber-500 dark:text-amber-400" /> Controle de Entregadores
                         </h2>
                         <div className="flex flex-wrap items-center gap-2">
-                          <input type="text" value={periodo} onChange={(e) => setPeriodo(e.target.value)} className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-emerald-600 dark:text-emerald-400 rounded-lg px-3 py-2 text-sm font-black focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 w-full sm:w-auto text-center shadow-sm" placeholder="Nome do Período" />
+                          <input type="text" value={periodoQuinzena} onChange={(e) => setPeriodoQuinzena(e.target.value)} className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-emerald-600 dark:text-emerald-400 rounded-lg px-3 py-2 text-sm font-black focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 w-full sm:w-auto text-center shadow-sm" placeholder="Ex: Quinzena 1" />
                           <button onClick={() => setFilterEntregadoresPendentes(!filterEntregadoresPendentes)} className={`flex items-center px-3 py-2 rounded-lg text-sm font-bold transition-colors border shadow-sm ${filterEntregadoresPendentes ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'}`}>
                             <Filter size={16} className="mr-1" /> {filterEntregadoresPendentes ? 'Ver Todos' : 'Pendentes'}
                           </button>
@@ -678,44 +742,79 @@
                         <div className="bg-white dark:bg-slate-800 rounded-xl p-10 text-center border border-slate-200 dark:border-slate-700 flex flex-col items-center shadow-sm">
                           <History size={64} className="text-slate-300 dark:text-slate-600 mb-4" />
                           <h3 className="text-xl font-black text-slate-700 dark:text-slate-300">Nenhum fechamento ainda</h3>
-                          <p className="text-slate-500 mt-2 text-sm max-w-md">Ao finalizar uma quinzena de trabalho na aba "Resumo", os dados consolidados aparecerão salvos aqui de forma permanente.</p>
+                          <p className="text-slate-500 mt-2 text-sm max-w-md">Ao finalizar uma quinzena ou mês na aba "Resumo", os dados consolidados aparecerão salvos aqui de forma permanente.</p>
                         </div>
                       ) : (
                         <div className="space-y-4">
-                          {historico.map((item) => (
-                            <div key={item.id} className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm hover:shadow-md transition-shadow">
-                              <div className="p-5 flex flex-col md:flex-row justify-between md:items-center bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700 gap-4">
-                                <div>
-                                  <h3 className="text-lg font-black text-emerald-600 dark:text-emerald-400">{item.periodo}</h3>
-                                  <div className="text-xs font-medium text-slate-500 dark:text-slate-400 flex flex-col mt-1">
-                                    <span>Início: {formatDate(item.dataInicio || item.dataFechamento)}</span>
-                                    <span>Fechado: {formatDate(item.dataFechamento)}</span>
+                          {historico.map((item) => {
+                            const isEntregadores = item.tipo === 'entregadores';
+                            const isDespesas = item.tipo === 'despesas';
+                            const isLegacy = !item.tipo;
+
+                            return (
+                              <div key={item.id} className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm hover:shadow-md transition-shadow">
+                                <div className={`p-5 flex flex-col md:flex-row justify-between md:items-center bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700 gap-4 ${isDespesas ? 'border-l-4 border-l-blue-500' : 'border-l-4 border-l-emerald-500'}`}>
+                                  <div>
+                                    <h3 className={`text-lg font-black ${isDespesas ? 'text-blue-600 dark:text-blue-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{item.periodo}</h3>
+                                    <div className="text-xs font-medium text-slate-500 dark:text-slate-400 flex flex-col mt-1 space-y-1">
+                                      <span>Início: {formatDate(item.dataInicio || item.dataFechamento)}</span>
+                                      <span>Fechado: {formatDate(item.dataFechamento)}</span>
+                                      <span className="mt-1 inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider w-fit bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
+                                          {isEntregadores ? 'Fechamento de Quinzena' : isDespesas ? 'Fechamento de Mês' : 'Fechamento Completo (Antigo)'}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <div className="flex flex-wrap items-center gap-4 bg-white dark:bg-slate-800 p-3 rounded-lg border border-slate-200 dark:border-slate-700">
+                                    {(isLegacy || isDespesas) && (
+                                        <div className="text-right">
+                                          <div className="text-[10px] font-bold text-slate-400 uppercase">Total Despesas</div>
+                                          <div className="font-black text-slate-800 dark:text-white">{formatCurrency(item.totais?.despesas)}</div>
+                                        </div>
+                                    )}
+                                    
+                                    {(isLegacy || isDespesas) && (isLegacy || isEntregadores) && (
+                                        <div className="h-8 w-px bg-slate-200 dark:bg-slate-700 hidden sm:block"></div>
+                                    )}
+
+                                    {(isLegacy || isEntregadores) && (
+                                        <div className="text-right">
+                                          <div className="text-[10px] font-bold text-slate-400 uppercase">Entregadores</div>
+                                          <div className="font-black text-slate-800 dark:text-white">{formatCurrency(item.totais?.entregadores)}</div>
+                                        </div>
+                                    )}
+                                    <button onClick={() => requestDeletarHistorico(item.id)} className="ml-2 p-2 bg-rose-50 dark:bg-rose-900/20 text-rose-500 hover:bg-rose-500 hover:text-white rounded-full transition-colors border border-rose-100 dark:border-rose-800/30 shadow-sm" title="Apagar"><Trash2 size={16} /></button>
                                   </div>
                                 </div>
-                                <div className="flex flex-wrap items-center gap-4 bg-white dark:bg-slate-800 p-3 rounded-lg border border-slate-200 dark:border-slate-700">
-                                  <div className="text-right">
-                                    <div className="text-[10px] font-bold text-slate-400 uppercase">Total Despesas</div>
-                                    <div className="font-black text-slate-800 dark:text-white">{formatCurrency(item.totais.despesas)}</div>
-                                  </div>
-                                  <div className="text-right border-l border-slate-200 dark:border-slate-700 pl-4">
-                                    <div className="text-[10px] font-bold text-slate-400 uppercase">Entregadores</div>
-                                    <div className="font-black text-slate-800 dark:text-white">{formatCurrency(item.totais.entregadores)}</div>
-                                  </div>
-                                  <button onClick={() => requestDeletarHistorico(item.id)} className="ml-2 p-2 bg-rose-50 dark:bg-rose-900/20 text-rose-500 hover:bg-rose-500 hover:text-white rounded-full transition-colors border border-rose-100 dark:border-rose-800/30 shadow-sm" title="Apagar"><Trash2 size={16} /></button>
-                                </div>
+                                
+                                {(isLegacy || isEntregadores) && (
+                                    <div className="p-5 text-sm text-slate-600 dark:text-slate-300">
+                                      <p className="mb-3 font-medium"><strong>Pacotes Entregues na Quinzena:</strong> <span className="bg-slate-100 dark:bg-slate-700 px-2 py-1 rounded-md font-black">{item.totais?.pacotes || 0}</span></p>
+                                      <div className="flex flex-wrap gap-2">
+                                        {item.entregadores && item.entregadores.filter(e => e.quantidade > 0).map((e, idx) => (
+                                          <span key={idx} className="bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-3 py-1.5 rounded-lg text-xs flex items-center shadow-sm">
+                                            {e.nome}: <strong className="text-slate-800 dark:text-white ml-1">{e.quantidade} pct</strong>
+                                          </span>
+                                        ))}
+                                      </div>
+                                    </div>
+                                )}
+                                
+                                {isDespesas && item.despesas && (
+                                    <div className="p-5 text-sm text-slate-600 dark:text-slate-300 border-t border-slate-100 dark:border-slate-700">
+                                      <p className="mb-3 font-medium"><strong>Despesas Pagas no Mês:</strong></p>
+                                      <div className="flex flex-wrap gap-2">
+                                        {item.despesas.filter(d => d.pago).map((d, idx) => (
+                                          <span key={idx} className="bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-3 py-1.5 rounded-lg text-xs flex items-center shadow-sm">
+                                            {d.descricao}: <strong className="text-slate-800 dark:text-white ml-1">{formatCurrency(d.valor)}</strong>
+                                          </span>
+                                        ))}
+                                        {item.despesas.filter(d => d.pago).length === 0 && <span className="text-slate-400 italic">Nenhuma despesa foi marcada como paga.</span>}
+                                      </div>
+                                    </div>
+                                )}
                               </div>
-                              <div className="p-5 text-sm text-slate-600 dark:text-slate-300">
-                                <p className="mb-3 font-medium"><strong>Pacotes Entregues na Quinzena:</strong> <span className="bg-slate-100 dark:bg-slate-700 px-2 py-1 rounded-md font-black">{item.totais.pacotes}</span></p>
-                                <div className="flex flex-wrap gap-2">
-                                  {item.entregadores.filter(e => e.quantidade > 0).map((e, idx) => (
-                                    <span key={idx} className="bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-3 py-1.5 rounded-lg text-xs flex items-center shadow-sm">
-                                      {e.nome}: <strong className="text-slate-800 dark:text-white ml-1">{e.quantidade} pct</strong>
-                                    </span>
-                                  ))}
-                                </div>
-                              </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       )}
                     </div>
