@@ -148,7 +148,7 @@
       const [darkMode, setDarkMode] = useState(true);
       const [toast, setToast] = useState(null);
 
-      const [periodo, setPeriodo] = useState('Semana 1');
+      const [periodo, setPeriodo] = useState('Quinzena 1');
       const [dataInicio, setDataInicio] = useState(new Date().toISOString());
       const [despesas, setDespesas] = useState(defaultDespesas);
       const [entregadores, setEntregadores] = useState(defaultEntregadores);
@@ -291,7 +291,7 @@
       const requestFecharSemana = () => {
         setModalConfig({
           isOpen: true,
-          title: 'Fechar Semana e Salvar?',
+          title: 'Fechar Quinzena e Salvar?',
           message: `Deseja finalizar "${periodo}" e salvar no Histórico?\n\nIsso zerará as quantidades, vales e status dos entregadores. (Nomes e valores mantidos).`,
           action: executeFecharSemana
         });
@@ -311,9 +311,9 @@
         
         setDataInicio(new Date().toISOString());
         const numeroAtual = parseInt(periodo.replace(/\D/g, '')) || 0;
-        setPeriodo(numeroAtual > 0 ? `Semana ${numeroAtual + 1}` : 'Novo Período');
+        setPeriodo(numeroAtual > 0 ? `Quinzena ${numeroAtual + 1}` : 'Novo Período');
         setActiveTab('historico');
-        showToast("Semana fechada com sucesso!");
+        showToast("Quinzena fechada com sucesso!");
       };
 
       const requestDeletarHistorico = (id) => {
@@ -421,7 +421,7 @@
                             <Printer size={16} /> <span>PDF</span>
                           </button>
                           <button onClick={requestFecharSemana} className="flex-1 sm:flex-none flex items-center justify-center space-x-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors text-sm font-medium">
-                            <Save size={16} /> <span>Fechar Semana</span>
+                            <Save size={16} /> <span>Fechar Quinzena</span>
                           </button>
                         </div>
                       </div>
@@ -678,7 +678,7 @@
                         <div className="bg-white dark:bg-slate-800 rounded-xl p-10 text-center border border-slate-200 dark:border-slate-700 flex flex-col items-center shadow-sm">
                           <History size={64} className="text-slate-300 dark:text-slate-600 mb-4" />
                           <h3 className="text-xl font-black text-slate-700 dark:text-slate-300">Nenhum fechamento ainda</h3>
-                          <p className="text-slate-500 mt-2 text-sm max-w-md">Ao finalizar uma semana de trabalho na aba "Resumo", os dados consolidados aparecerão salvos aqui de forma permanente.</p>
+                          <p className="text-slate-500 mt-2 text-sm max-w-md">Ao finalizar uma quinzena de trabalho na aba "Resumo", os dados consolidados aparecerão salvos aqui de forma permanente.</p>
                         </div>
                       ) : (
                         <div className="space-y-4">
@@ -705,7 +705,7 @@
                                 </div>
                               </div>
                               <div className="p-5 text-sm text-slate-600 dark:text-slate-300">
-                                <p className="mb-3 font-medium"><strong>Pacotes Entregues na Semana:</strong> <span className="bg-slate-100 dark:bg-slate-700 px-2 py-1 rounded-md font-black">{item.totais.pacotes}</span></p>
+                                <p className="mb-3 font-medium"><strong>Pacotes Entregues na Quinzena:</strong> <span className="bg-slate-100 dark:bg-slate-700 px-2 py-1 rounded-md font-black">{item.totais.pacotes}</span></p>
                                 <div className="flex flex-wrap gap-2">
                                   {item.entregadores.filter(e => e.quantidade > 0).map((e, idx) => (
                                     <span key={idx} className="bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-3 py-1.5 rounded-lg text-xs flex items-center shadow-sm">
