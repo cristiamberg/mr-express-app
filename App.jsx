@@ -1,0 +1,612 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { 
+  CheckCircle, Circle, Plus, Trash2, TrendingUp, Users, Wallet,
+  Menu, X, Save, AlertCircle, History, Printer,
+  Filter, ArrowDownUp
+} from 'lucide-react';
+
+const formatCurrency = (value) => {
+  return new Intl.NumberFormat('pt-BR', {
+    style: 'currency',
+    currency: 'BRL',
+  }).format(value || 0);
+};
+
+const formatDate = (isoString) => {
+  return new Intl.DateTimeFormat('pt-BR', {
+    day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
+  }).format(new Date(isoString));
+};
+
+const parseNumber = (value) => {
+  if (typeof value === 'number') return value;
+  if (!value) return 0;
+  const parsed = parseFloat(value.toString().replace(/\./g, '').replace(',', '.'));
+  return isNaN(parsed) ? 0 : parsed;
+};
+
+const defaultDespesas = [
+  { id: 1, descricao: 'Aluguel', valor: 0, pago: false },
+  { id: 2, descricao: 'Internet', valor: 0, pago: false },
+  { id: 3, descricao: 'Energia', valor: 0, pago: false },
+  { id: 4, descricao: 'Água', valor: 0, pago: false },
+  { id: 5, descricao: 'Caminhão', valor: 0, pago: false },
+  { id: 6, descricao: 'Contador', valor: 0, pago: false },
+];
+
+const defaultEntregadores = [
+  { id: 1, nome: 'Carlos', valorPorPacote: 2.20, quantidade: 0, pago: false },
+  { id: 2, nome: 'Everton', valorPorPacote: 2.30, quantidade: 0, pago: false },
+  { id: 3, nome: 'Kel', valorPorPacote: 2.30, quantidade: 0, pago: false },
+  { id: 4, nome: 'Adriano', valorPorPacote: 2.25, quantidade: 0, pago: false },
+  { id: 5, nome: 'Matheus', valorPorPacote: 2.30, quantidade: 0, pago: false },
+  { id: 6, nome: 'Ezequiel', valorPorPacote: 2.20, quantidade: 0, pago: false },
+];
+
+export default function App() {
+  const [activeTab, setActiveTab] = useState('resumo');
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  const [periodo, setPeriodo] = useState('Semana 1');
+  const [despesas, setDespesas] = useState(defaultDespesas);
+  const [entregadores, setEntregadores] = useState(defaultEntregadores);
+  const [historico, setHistorico] = useState([]);
+
+  const [filterEntregadoresPendentes, setFilterEntregadoresPendentes] = useState(false);
+  const [sortByQuantidade, setSortByQuantidade] = useState(false);
+  
+  const [modalConfig, setModalConfig] = useState({ isOpen: false, title: '', message: '', action: null });
+
+  useEffect(() => {
+    const savedState = localStorage.getItem('mr_express_state');
+    if (savedState) {
+      const parsed = JSON.parse(savedState);
+      setPeriodo(parsed.periodo || 'Semana 1');
+      setDespesas(parsed.despesas || defaultDespesas);
+      setEntregadores(parsed.entregadores || defaultEntregadores);
+    }
+    const savedHistory = localStorage.getItem('mr_express_historico');
+    if (savedHistory) setHistorico(JSON.parse(savedHistory));
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('mr_express_state', JSON.stringify({ periodo, despesas, entregadores }));
+  }, [periodo, despesas, entregadores]);
+
+  const totais = useMemo(() => {
+    const totalDespesas = despesas.reduce((acc, curr) => acc + parseNumber(curr.valor), 0);
+    const totalDespesasPagas = despesas.filter(d => d.pago).reduce((acc, curr) => acc + parseNumber(curr.valor), 0);
+    
+    const totalEntregadores = entregadores.reduce((acc, curr) => acc + (parseNumber(curr.valorPorPacote) * parseNumber(curr.quantidade)), 0);
+    const totalEntregadoresPagos = entregadores.filter(e => e.pago).reduce((acc, curr) => acc + (parseNumber(curr.valorPorPacote) * parseNumber(curr.quantidade)), 0);
+    const totalPacotes = entregadores.reduce((acc, curr) => acc + parseNumber(curr.quantidade), 0);
+
+    return {
+      despesas: totalDespesas,
+      despesasPagas: totalDespesasPagas,
+      entregadores: totalEntregadores,
+      entregadoresPagos: totalEntregadoresPagos,
+      geral: totalDespesas + totalEntregadores,
+      geralPago: totalDespesasPagas + totalEntregadoresPagos,
+      pacotes: totalPacotes
+    };
+  }, [despesas, entregadores]);
+
+  const updateDespesa = (id, field, value) => {
+    setDespesas(despesas.map(d => d.id === id ? { ...d, [field]: value } : d));
+  };
+  const toggleDespesaPago = (id) => setDespesas(despesas.map(d => d.id === id ? { ...d, pago: !d.pago } : d));
+  const addDespesa = () => setDespesas([...despesas, { id: Date.now(), descricao: '', valor: 0, pago: false }]);
+  const removeDespesa = (id) => setDespesas(despesas.filter(d => d.id !== id));
+
+  const updateEntregador = (id, field, value) => {
+    setEntregadores(entregadores.map(e => e.id === id ? { ...e, [field]: value } : e));
+  };
+  const toggleEntregadorPago = (id) => setEntregadores(entregadores.map(e => e.id === id ? { ...e, pago: !e.pago } : e));
+  const addEntregador = () => setEntregadores([...entregadores, { id: Date.now(), nome: '', valorPorPacote: 0, quantidade: 0, pago: false }]);
+  const removeEntregador = (id) => setEntregadores(entregadores.filter(e => e.id !== id));
+
+  const requestFecharSemana = () => {
+    setModalConfig({
+      isOpen: true,
+      title: 'Fechar Semana e Salvar?',
+      message: `Deseja finalizar "${periodo}" e salvar no Histórico?\n\nIsso zerará as quantidades de pacotes e status de pagamento de todos os entregadores para iniciar um novo período limpo. (Nomes e valores por pacote serão mantidos)`,
+      action: executeFecharSemana
+    });
+  };
+
+  const executeFecharSemana = () => {
+    const novoFechamento = {
+      id: Date.now().toString(),
+      dataFechamento: new Date().toISOString(),
+      periodo: periodo,
+      totais: { ...totais },
+      entregadores: [...entregadores],
+      despesas: [...despesas]
+    };
+
+    const newHist = [novoFechamento, ...historico];
+    setHistorico(newHist);
+    localStorage.setItem('mr_express_historico', JSON.stringify(newHist));
+
+    setDespesas(despesas.map(d => ({ ...d, pago: false })));
+    setEntregadores(entregadores.map(e => ({ ...e, quantidade: 0, pago: false })));
+    
+    const numeroAtual = parseInt(periodo.replace(/\D/g, '')) || 0;
+    setPeriodo(numeroAtual > 0 ? `Semana ${numeroAtual + 1}` : 'Novo Período');
+    setActiveTab('historico');
+  };
+
+  const requestDeletarHistorico = (id) => {
+    setModalConfig({
+      isOpen: true,
+      title: 'Apagar Registro de Histórico',
+      message: 'Tem certeza que deseja apagar este histórico permanentemente? Esta ação não pode ser desfeita.',
+      action: () => executeDeletarHistorico(id)
+    });
+  };
+
+  const executeDeletarHistorico = (id) => {
+    const newHist = historico.filter(h => h.id !== id);
+    setHistorico(newHist);
+    localStorage.setItem('mr_express_historico', JSON.stringify(newHist));
+  };
+
+  const NavButton = ({ id, icon: Icon, label }) => (
+    <button
+      onClick={() => { setActiveTab(id); setIsMobileMenuOpen(false); }}
+      className={`flex items-center space-x-2 w-full px-4 py-3 rounded-lg transition-colors ${
+        activeTab === id ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-300 hover:bg-slate-800 hover:text-emerald-400'
+      }`}
+    >
+      <Icon size={20} />
+      <span className="font-medium">{label}</span>
+    </button>
+  );
+
+  const renderResumo = () => (
+    <div className="space-y-6">
+      
+      <div className="flex flex-col sm:flex-row justify-between items-center gap-4 bg-slate-800 p-4 rounded-xl border border-slate-700 print:hidden">
+         <div className="text-sm text-slate-400 flex items-center">
+            Período Ativo: <span className="ml-2 font-bold text-emerald-400 text-lg">{periodo}</span>
+         </div>
+         <div className="flex w-full sm:w-auto gap-2">
+            <button 
+              onClick={() => window.print()}
+              className="flex-1 sm:flex-none flex items-center justify-center space-x-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-sm font-medium"
+            >
+              <Printer size={16} /> <span>Imprimir / PDF</span>
+            </button>
+            <button 
+              onClick={requestFecharSemana}
+              className="flex-1 sm:flex-none flex items-center justify-center space-x-2 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg transition-colors text-sm font-medium"
+            >
+              <Save size={16} /> <span>Fechar Semana</span>
+            </button>
+         </div>
+      </div>
+
+      <div className="bg-slate-800 rounded-xl p-6 shadow-lg border border-slate-700 print:border-none print:shadow-none print:bg-white">
+        <h2 className="text-xl font-bold text-white print:text-black mb-4 flex items-center">
+          <TrendingUp className="mr-2 text-emerald-400 print:text-emerald-600" /> Visão Geral: {periodo}
+        </h2>
+        
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="bg-slate-700/50 print:bg-slate-100 p-4 rounded-lg border border-slate-600 print:border-slate-300">
+            <p className="text-sm text-slate-400 print:text-slate-600 mb-1">Custo Total Projetado</p>
+            <p className="text-3xl font-bold text-white print:text-black">{formatCurrency(totais.geral)}</p>
+          </div>
+          <div className="bg-slate-700/50 print:bg-slate-100 p-4 rounded-lg border border-slate-600 print:border-slate-300">
+            <p className="text-sm text-slate-400 print:text-slate-600 mb-1">Total Já Pago</p>
+            <p className="text-3xl font-bold text-emerald-400 print:text-emerald-700">{formatCurrency(totais.geralPago)}</p>
+          </div>
+          <div className="bg-slate-700/50 print:bg-slate-100 p-4 rounded-lg border border-slate-600 print:border-slate-300">
+            <p className="text-sm text-slate-400 print:text-slate-600 mb-1">Pendente de Pagamento</p>
+            <p className="text-3xl font-bold text-rose-400 print:text-rose-600">{formatCurrency(totais.geral - totais.geralPago)}</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="bg-slate-800 rounded-xl p-6 shadow-lg border border-slate-700 print:border-slate-300 print:bg-white">
+          <h3 className="text-lg font-semibold text-white print:text-black mb-4 flex items-center border-b border-slate-700 print:border-slate-300 pb-2">
+            <Wallet className="mr-2 text-blue-400 print:text-blue-600" size={20}/> Despesas Fixas
+          </h3>
+          <div className="space-y-3">
+            <div className="flex justify-between items-center">
+              <span className="text-slate-300 print:text-slate-700">Total Previsto:</span>
+              <span className="font-medium text-white print:text-black">{formatCurrency(totais.despesas)}</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-slate-300 print:text-slate-700">Total Pago:</span>
+              <span className="font-medium text-emerald-400 print:text-emerald-700">{formatCurrency(totais.despesasPagas)}</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-slate-800 rounded-xl p-6 shadow-lg border border-slate-700 print:border-slate-300 print:bg-white">
+          <h3 className="text-lg font-semibold text-white print:text-black mb-4 flex items-center border-b border-slate-700 print:border-slate-300 pb-2">
+            <Users className="mr-2 text-amber-400 print:text-amber-600" size={20}/> Equipe (Entregadores)
+          </h3>
+          <div className="space-y-3">
+            <div className="flex justify-between items-center">
+              <span className="text-slate-300 print:text-slate-700">Total de Pacotes:</span>
+              <span className="font-bold text-white print:text-black bg-slate-700 print:bg-slate-200 px-2 py-1 rounded">{totais.pacotes}</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-slate-300 print:text-slate-700">Custo Total:</span>
+              <span className="font-medium text-white print:text-black">{formatCurrency(totais.entregadores)}</span>
+            </div>
+             <div className="flex justify-between items-center">
+              <span className="text-slate-300 print:text-slate-700">Total Pago:</span>
+              <span className="font-medium text-emerald-400 print:text-emerald-700">{formatCurrency(totais.entregadoresPagos)}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <div className="hidden print:block mt-8">
+         <h3 className="text-lg font-bold border-b border-black pb-2 mb-4">Detalhamento Entregadores</h3>
+         <table className="w-full text-left text-sm border-collapse">
+            <thead>
+               <tr className="border-b border-slate-300">
+                  <th className="py-2">Nome</th>
+                  <th>Pacotes</th>
+                  <th>Valor/Pac.</th>
+                  <th>Total</th>
+                  <th>Status</th>
+               </tr>
+            </thead>
+            <tbody>
+               {entregadores.map(e => (
+                  <tr key={e.id} className="border-b border-slate-200">
+                     <td className="py-2">{e.nome}</td>
+                     <td>{e.quantidade}</td>
+                     <td>{formatCurrency(e.valorPorPacote)}</td>
+                     <td>{formatCurrency(parseNumber(e.quantidade) * parseNumber(e.valorPorPacote))}</td>
+                     <td>{e.pago ? 'Pago' : 'Pendente'}</td>
+                  </tr>
+               ))}
+            </tbody>
+         </table>
+      </div>
+    </div>
+  );
+
+  const renderDespesas = () => (
+    <div>
+      <div className="flex justify-between items-center mb-6">
+        <h2 className="text-xl font-bold text-white flex items-center">
+          <Wallet className="mr-2 text-blue-400" /> Despesas Fixas
+        </h2>
+        <button onClick={addDespesa} className="flex items-center bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors shadow-sm">
+          <Plus size={16} className="mr-1" /> Adicionar
+        </button>
+      </div>
+
+      <div className="bg-slate-800 rounded-xl shadow-lg border border-slate-700 overflow-hidden">
+        <div className="hidden md:grid grid-cols-12 gap-4 p-4 bg-slate-900/50 border-b border-slate-700 text-xs font-semibold text-slate-400 uppercase tracking-wider">
+          <div className="col-span-6">O que é</div>
+          <div className="col-span-3">Valor (R$)</div>
+          <div className="col-span-2 text-center">Status</div>
+          <div className="col-span-1 text-center">Ações</div>
+        </div>
+
+        <div className="divide-y divide-slate-700/50">
+          {despesas.map((item) => (
+            <div key={item.id} className={`p-4 transition-colors ${item.pago ? 'bg-emerald-900/10' : 'hover:bg-slate-700/30'}`}>
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
+                <div className="col-span-1 md:col-span-6">
+                  <input type="text" value={item.descricao} onChange={(e) => updateDespesa(item.id, 'descricao', e.target.value)} className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-emerald-500" placeholder="Ex: Aluguel" />
+                </div>
+                <div className="col-span-1 md:col-span-3 relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">R$</span>
+                  <input type="number" step="0.01" value={item.valor || ''} onChange={(e) => updateDespesa(item.id, 'valor', parseFloat(e.target.value) || 0)} className="w-full bg-slate-900 border border-slate-600 rounded-lg pl-9 pr-3 py-2 text-white focus:outline-none focus:border-emerald-500 font-mono" placeholder="0.00" />
+                </div>
+                <div className="col-span-1 md:col-span-3 flex items-center justify-between md:justify-around mt-2 md:mt-0">
+                  <button onClick={() => toggleDespesaPago(item.id)} className={`flex items-center space-x-2 px-3 py-1.5 rounded-full text-sm font-medium transition-all w-32 justify-center ${item.pago ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-slate-700 text-slate-300'}`}>
+                    {item.pago ? <CheckCircle size={16} /> : <Circle size={16} />} <span>{item.pago ? 'Pago' : 'Pendente'}</span>
+                  </button>
+                  <button onClick={() => removeDespesa(item.id)} className="p-2 text-slate-400 hover:text-rose-400">
+                    <Trash2 size={18} />
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="bg-slate-900 p-4 border-t border-slate-700 flex justify-between items-center rounded-b-xl">
+          <span className="font-bold text-slate-300">TOTAL DESPESAS</span>
+          <span className="text-xl font-bold text-white">{formatCurrency(totais.despesas)}</span>
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderEntregadores = () => {
+    let displayEntregadores = [...entregadores];
+    if (filterEntregadoresPendentes) {
+       displayEntregadores = displayEntregadores.filter(e => !e.pago);
+    }
+    if (sortByQuantidade) {
+       displayEntregadores.sort((a, b) => parseNumber(b.quantidade) - parseNumber(a.quantidade));
+    }
+
+    return (
+      <div>
+        <div className="flex flex-col lg:flex-row lg:justify-between lg:items-center mb-6 space-y-4 lg:space-y-0">
+          <h2 className="text-xl font-bold text-white flex items-center">
+            <Users className="mr-2 text-amber-400" /> Controle de Entregadores
+          </h2>
+          
+          <div className="flex flex-wrap items-center gap-2">
+            <input 
+              type="text" value={periodo} onChange={(e) => setPeriodo(e.target.value)}
+              className="bg-slate-800 border border-slate-700 text-emerald-400 rounded-lg px-3 py-2 text-sm font-semibold focus:outline-none focus:border-emerald-500 w-full sm:w-auto text-center"
+              placeholder="Nome do Período"
+            />
+            
+            <button 
+              onClick={() => setFilterEntregadoresPendentes(!filterEntregadoresPendentes)}
+              className={`flex items-center px-3 py-2 rounded-lg text-sm font-medium transition-colors border ${filterEntregadoresPendentes ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'}`}
+              title="Mostrar apenas pendentes"
+            >
+              <Filter size={16} className="mr-1" /> {filterEntregadoresPendentes ? 'Ver Todos' : 'Pendentes'}
+            </button>
+            
+            <button 
+              onClick={() => setSortByQuantidade(!sortByQuantidade)}
+              className={`flex items-center px-3 py-2 rounded-lg text-sm font-medium transition-colors border ${sortByQuantidade ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'}`}
+              title="Ordenar por maior quantidade"
+            >
+              <ArrowDownUp size={16} />
+            </button>
+
+            <button onClick={addEntregador} className="flex items-center bg-amber-600 hover:bg-amber-700 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors">
+              <Plus size={16} className="mr-1" /> Add
+            </button>
+          </div>
+        </div>
+
+        <div className="bg-slate-800 rounded-xl shadow-lg border border-slate-700 overflow-hidden">
+          <div className="hidden lg:grid grid-cols-12 gap-2 p-4 bg-slate-900/50 border-b border-slate-700 text-xs font-semibold text-slate-400 uppercase tracking-wider">
+            <div className="col-span-4">Nome</div>
+            <div className="col-span-2 text-center">Valor/Pacote</div>
+            <div className="col-span-2 text-center">Pacotes</div>
+            <div className="col-span-2 text-right">Total a Pagar</div>
+            <div className="col-span-2 text-center">Ações</div>
+          </div>
+
+          <div className="divide-y divide-slate-700/50">
+            {displayEntregadores.map((item) => {
+              const totalItem = parseNumber(item.valorPorPacote) * parseNumber(item.quantidade);
+              return (
+                <div key={item.id} className={`p-4 transition-colors ${item.pago ? 'bg-emerald-900/10' : 'hover:bg-slate-700/30'}`}>
+                  
+                  <div className="hidden lg:grid grid-cols-12 gap-2 items-center">
+                    <div className="col-span-4">
+                      <input type="text" value={item.nome} onChange={(e) => updateEntregador(item.id, 'nome', e.target.value)} className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-white font-medium focus:outline-none focus:border-emerald-500" />
+                    </div>
+                    <div className="col-span-2 relative">
+                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-xs">R$</span>
+                      <input type="number" step="0.01" value={item.valorPorPacote || ''} onChange={(e) => updateEntregador(item.id, 'valorPorPacote', parseFloat(e.target.value) || 0)} className="w-full bg-slate-900 border border-slate-600 rounded-lg pl-7 pr-2 py-2 text-center text-white focus:outline-none focus:border-emerald-500 font-mono" />
+                    </div>
+                    <div className="col-span-2">
+                      <input type="number" value={item.quantidade || ''} onChange={(e) => updateEntregador(item.id, 'quantidade', parseInt(e.target.value, 10) || 0)} className="w-full bg-slate-900 border border-slate-600 rounded-lg px-2 py-2 text-center text-white font-bold text-lg focus:outline-none focus:border-emerald-500 bg-emerald-900/20" placeholder="0" />
+                    </div>
+                    <div className="col-span-2 text-right font-bold text-lg text-white">
+                      {formatCurrency(totalItem)}
+                    </div>
+                    <div className="col-span-2 flex items-center justify-center space-x-2">
+                      <button onClick={() => toggleEntregadorPago(item.id)} className={`flex items-center space-x-1 px-3 py-1.5 rounded-full text-xs font-medium w-24 justify-center ${item.pago ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-slate-700 text-slate-300'}`}>
+                        {item.pago ? <CheckCircle size={14} /> : <Circle size={14} />} <span>{item.pago ? 'Pago' : 'Pendente'}</span>
+                      </button>
+                      <button onClick={() => removeEntregador(item.id)} className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/20 rounded-lg transition-colors" title="Remover">
+                        <Trash2 size={18} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Layout para Celular */}
+                  <div className="lg:hidden flex flex-col space-y-3">
+                    <div className="flex justify-between items-center">
+                      <input type="text" value={item.nome} onChange={(e) => updateEntregador(item.id, 'nome', e.target.value)} className="bg-transparent border-b border-slate-600 px-1 py-1 text-white font-bold text-lg focus:outline-none focus:border-emerald-500 w-2/3" />
+                      <button onClick={() => removeEntregador(item.id)} className="p-2 text-slate-400 hover:text-rose-400">
+                        <Trash2 size={18} />
+                      </button>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-4 bg-slate-900/30 p-3 rounded-lg border border-slate-700/50">
+                      <div>
+                        <label className="text-[10px] text-slate-400 uppercase block mb-1">Valor/Pacote</label>
+                        <div className="relative">
+                          <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-sm">R$</span>
+                          <input type="number" step="0.01" value={item.valorPorPacote || ''} onChange={(e) => updateEntregador(item.id, 'valorPorPacote', parseFloat(e.target.value) || 0)} className="w-full bg-slate-900 border border-slate-600 rounded-md pl-7 pr-2 py-1 text-white focus:outline-none focus:border-emerald-500 font-mono text-sm" />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-slate-400 uppercase block mb-1">Pacotes</label>
+                         <input type="number" value={item.quantidade || ''} onChange={(e) => updateEntregador(item.id, 'quantidade', parseInt(e.target.value, 10) || 0)} className="w-full bg-slate-900 border border-slate-600 rounded-md px-2 py-1 text-center text-emerald-400 font-bold focus:outline-none focus:border-emerald-500 text-lg bg-emerald-900/10" placeholder="0" />
+                      </div>
+                    </div>
+
+                    <div className="flex justify-between items-center pt-2">
+                      <button onClick={() => toggleEntregadorPago(item.id)} className={`flex items-center space-x-2 px-3 py-1.5 rounded-full text-sm font-medium transition-all ${item.pago ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-slate-700 text-slate-300'}`}>
+                        {item.pago ? <CheckCircle size={16} /> : <Circle size={16} />} <span>{item.pago ? 'Pago' : 'Pendente'}</span>
+                      </button>
+                      <div className="text-right">
+                        <span className="text-[10px] text-slate-400 uppercase block">Total</span>
+                        <span className="font-bold text-xl text-white">{formatCurrency(totalItem)}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+            {displayEntregadores.length === 0 && (
+               <div className="p-8 text-center text-slate-400 flex flex-col items-center">
+                 <AlertCircle className="mb-2 opacity-50" size={32}/>
+                 <p>Nenhum entregador encontrado.</p>
+              </div>
+            )}
+          </div>
+          
+          <div className="bg-slate-900 p-4 border-t border-slate-700 flex flex-col sm:flex-row justify-between items-center rounded-b-xl gap-2">
+            <div className="flex items-center space-x-2">
+               <span className="font-bold text-slate-400">TOTAL PACOTES:</span>
+               <span className="bg-amber-500/20 text-amber-400 font-bold px-3 py-1 rounded-lg text-lg border border-amber-500/30">{totais.pacotes}</span>
+            </div>
+            <div className="flex items-center space-x-2">
+               <span className="font-bold text-slate-400">A PAGAR GERAL:</span>
+               <span className="text-2xl font-black text-white">{formatCurrency(totais.entregadores)}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderHistorico = () => (
+     <div>
+        <h2 className="text-xl font-bold text-white mb-6 flex items-center">
+          <History className="mr-2 text-indigo-400" /> Histórico de Fechamentos
+        </h2>
+
+        {historico.length === 0 ? (
+           <div className="bg-slate-800 rounded-xl p-8 text-center border border-slate-700 flex flex-col items-center">
+              <History size={48} className="text-slate-600 mb-4" />
+              <h3 className="text-lg font-medium text-slate-300">Nenhum histórico ainda</h3>
+              <p className="text-slate-500 mt-2 text-sm max-w-md">Ao finalizar uma semana de trabalho (botão "Fechar Semana" no Resumo), os dados aparecerão salvos aqui.</p>
+           </div>
+        ) : (
+           <div className="space-y-4">
+              {historico.map((item) => (
+                 <div key={item.id} className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden shadow-sm hover:border-slate-600 transition-colors">
+                    <div className="p-4 flex flex-col md:flex-row justify-between md:items-center bg-slate-900/50 border-b border-slate-700 gap-4">
+                       <div>
+                          <h3 className="text-lg font-bold text-emerald-400">{item.periodo}</h3>
+                          <span className="text-xs text-slate-400 flex items-center">Fechado em: {formatDate(item.dataFechamento)}</span>
+                       </div>
+                       <div className="flex items-center gap-4">
+                          <div className="text-right">
+                             <div className="text-xs text-slate-400">Total Despesas</div>
+                             <div className="font-bold text-white">{formatCurrency(item.totais.despesas)}</div>
+                          </div>
+                          <div className="text-right border-l border-slate-700 pl-4">
+                             <div className="text-xs text-slate-400">Total Entregadores</div>
+                             <div className="font-bold text-white">{formatCurrency(item.totais.entregadores)}</div>
+                          </div>
+                          <button 
+                             onClick={() => requestDeletarHistorico(item.id)}
+                             className="ml-2 p-2 text-slate-500 hover:bg-rose-500/20 hover:text-rose-400 rounded-lg transition-colors"
+                             title="Apagar este registro"
+                          >
+                             <Trash2 size={18} />
+                          </button>
+                       </div>
+                    </div>
+                    <div className="p-4 text-sm text-slate-300">
+                       <p className="mb-2"><strong>Pacotes Entregues:</strong> {item.totais.pacotes}</p>
+                       <div className="flex flex-wrap gap-2">
+                          {item.entregadores.filter(e => e.quantidade > 0).map((e, idx) => (
+                             <span key={idx} className="bg-slate-700 px-2 py-1 rounded text-xs">
+                                {e.nome}: <strong className="text-white">{e.quantidade} pct</strong>
+                             </span>
+                          ))}
+                       </div>
+                    </div>
+                 </div>
+              ))}
+           </div>
+        )}
+     </div>
+  );
+
+  return (
+    <div className="min-h-screen bg-[#0f172a] text-slate-200 font-sans selection:bg-emerald-500/30 flex flex-col md:flex-row">
+      
+      {isMobileMenuOpen && (
+        <div className="fixed inset-0 bg-black/60 z-40 md:hidden backdrop-blur-sm print:hidden" onClick={() => setIsMobileMenuOpen(false)} />
+      )}
+
+      {/* Sidebar de Navegação */}
+      <aside className={`
+        print:hidden fixed md:static inset-y-0 left-0 z-50 w-64 bg-slate-900 border-r border-slate-800 transform transition-transform duration-300 ease-in-out flex flex-col
+        ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
+      `}>
+        <div className="p-6 border-b border-slate-800 flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-emerald-600 tracking-tight">MR EXPRESS</h1>
+            <p className="text-xs text-slate-500 font-medium tracking-widest mt-1">GESTÃO SIMPLIFICADA</p>
+          </div>
+          <button className="md:hidden text-slate-400 hover:text-white" onClick={() => setIsMobileMenuOpen(false)}>
+            <X size={24} />
+          </button>
+        </div>
+
+        <div className="p-4 flex-1 space-y-2 overflow-y-auto">
+          <NavButton id="resumo" icon={TrendingUp} label="Resumo Geral" />
+          <NavButton id="despesas" icon={Wallet} label="Despesas Fixas" />
+          <NavButton id="entregadores" icon={Users} label="Entregadores" />
+          <div className="my-4 border-t border-slate-800 pt-4">
+             <NavButton id="historico" icon={History} label="Histórico" />
+          </div>
+        </div>
+      </aside>
+
+      {/* Conteúdo Principal */}
+      <main className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden print:h-auto print:overflow-visible">
+        
+        <header className="md:hidden bg-slate-900 border-b border-slate-800 p-4 flex items-center justify-between z-30 shadow-md print:hidden">
+           <div className="flex items-center space-x-3">
+             <button onClick={() => setIsMobileMenuOpen(true)} className="text-slate-300 p-1"><Menu size={24} /></button>
+             <h1 className="text-lg font-bold text-white">MR EXPRESS</h1>
+           </div>
+           <div className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-1 rounded text-xs font-bold truncate max-w-[100px]">
+              {periodo.split(' ')[0] || 'Atual'}
+           </div>
+        </header>
+
+        <div className="flex-1 overflow-auto p-4 md:p-8 bg-[#0f172a] print:bg-white print:p-0">
+          <div className="max-w-5xl mx-auto pb-20 md:pb-0">
+            {activeTab === 'resumo' && renderResumo()}
+            {activeTab === 'despesas' && renderDespesas()}
+            {activeTab === 'entregadores' && renderEntregadores()}
+            {activeTab === 'historico' && renderHistorico()}
+          </div>
+        </div>
+      </main>
+
+      {/* Modal de Confirmação Personalizado */}
+      {modalConfig.isOpen && (
+        <div className="fixed inset-0 bg-black/80 z-[100] flex items-center justify-center p-4 backdrop-blur-sm print:hidden">
+          <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 max-w-md w-full shadow-2xl animate-in zoom-in-95 duration-200">
+            <h3 className="text-xl font-bold text-white mb-2 flex items-center">
+              <AlertCircle className="mr-2 text-amber-500" size={24} /> {modalConfig.title}
+            </h3>
+            <p className="text-slate-300 mb-6 whitespace-pre-wrap">{modalConfig.message}</p>
+            <div className="flex justify-end space-x-3">
+              <button
+                onClick={() => setModalConfig({ isOpen: false, title: '', message: '', action: null })}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-slate-300 hover:bg-slate-700 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => {
+                  if (modalConfig.action) modalConfig.action();
+                  setModalConfig({ isOpen: false, title: '', message: '', action: null });
+                }}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium transition-colors"
+              >
+                Confirmar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+    </div>
+  );
+}
